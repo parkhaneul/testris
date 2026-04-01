@@ -28,7 +28,6 @@ function initLayout() {
 const boardEl        = document.getElementById('board');
 const slotPieceEls   = [document.getElementById('piece-0'), document.getElementById('piece-1')];
 const floatingEl     = document.getElementById('floating-piece');
-const rotateFab      = document.getElementById('rotate-fab');
 const confirmBtn     = document.getElementById('confirm-btn');
 const timerEl        = document.getElementById('timer-value');
 const scoreEl        = document.getElementById('score-value');
@@ -355,7 +354,6 @@ function enterPending(row, col) {
 
   hideFloating();
   clearHighlight();
-  rotateFab.classList.add('hidden');
 
   renderBoard();
   if (valid) showConfirmBtn();
@@ -392,7 +390,6 @@ function pickUpFromPending(cx, cy) {
 
   slotPieceEls[p.slotIdx].style.opacity = '0.25';
   showFloating(drag.piece, cx, cy);
-  rotateFab.classList.remove('hidden');
 }
 
 /** pending 피스 탭 회전 (유효 여부와 무관하게 항상 회전) */
@@ -484,12 +481,6 @@ function setupEvents() {
     }
   });
 
-  // Rotate FAB (drag 중 회전)
-  rotateFab.addEventListener('pointerdown', e => {
-    e.stopPropagation();
-    if (drag) rotateDragPiece();
-  });
-
   // Confirm 버튼 (pending 확정)
   confirmBtn.addEventListener('pointerdown', e => {
     e.stopPropagation();
@@ -525,7 +516,6 @@ function onSlotPointerDown(e, idx) {
 
   slotPieceEls[idx].style.opacity = '0.25';
   showFloating(drag.piece, e.clientX, e.clientY);
-  rotateFab.classList.remove('hidden');
 }
 
 // ── 전역 pointermove ─────────────────────────────────────────────
@@ -579,7 +569,6 @@ function cancelDrag() {
   slotPieceEls[drag.slotIdx].style.opacity = '1';
   hideFloating();
   clearHighlight();
-  rotateFab.classList.add('hidden');
   drag = null;
 }
 

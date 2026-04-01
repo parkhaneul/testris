@@ -10,21 +10,25 @@
 <body>
   <div id="app">
 
-    <!-- HUD -->
-    <div id="hud">
-      <div class="hud-item">
-        <div class="hud-label">TIME</div>
-        <div id="timer-value">100</div>
-      </div>
-      <div class="hud-item">
-        <div class="hud-label">SCORE</div>
-        <div id="score-value">0</div>
-      </div>
-    </div>
-
     <!-- 게임 영역 -->
     <div id="play-area">
-      <div id="board"></div>
+
+      <!-- 보드 컬럼: HUD + 보드 -->
+      <div id="board-col">
+        <div id="hud">
+          <div class="hud-item">
+            <div class="hud-label">TIME</div>
+            <div id="timer-value">100</div>
+          </div>
+          <div class="hud-item">
+            <div class="hud-label">SCORE</div>
+            <div id="score-value">0</div>
+          </div>
+        </div>
+        <div id="board"></div>
+      </div>
+
+      <!-- 슬롯 -->
       <div id="slots">
         <div class="slot" id="slot-0">
           <div class="slot-piece" id="piece-0"></div>
@@ -33,13 +37,11 @@
           <div class="slot-piece" id="piece-1"></div>
         </div>
       </div>
+
     </div>
 
     <!-- 드래그 중 표시되는 떠있는 블럭 -->
     <div id="floating-piece"></div>
-
-    <!-- 드래그 중 표시되는 회전 버튼 -->
-    <button id="rotate-fab" class="hidden" aria-label="블럭 회전">↻</button>
 
     <!-- pending 확정 버튼 (블럭 오른쪽 위에 표시) -->
     <button id="confirm-btn" class="hidden" aria-label="배치 확정">✓</button>
