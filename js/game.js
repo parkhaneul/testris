@@ -125,34 +125,39 @@ function renderBoard() {
     for (let c = 0; c < BOARD_SIZE; c++) {
       const el        = cells[r * BOARD_SIZE + c];
       const committed = board.grid[r][c];
-      const pendingColor = getPendingColor(r, c);
+      const pendingInfo = getPendingCellInfo(r, c);
 
       el.classList.remove('highlight', 'invalid');
 
-      if (pendingColor) {
-        el.style.backgroundColor = pendingColor;
-        el.classList.add('filled', 'pending');
+      if (pendingInfo) {
+        el.style.backgroundColor = pendingInfo.valid ? pendingInfo.color : '';
+        el.classList.add('filled');
+        el.classList.toggle('pending',         pendingInfo.valid);
+        el.classList.toggle('pending-invalid', !pendingInfo.valid);
       } else if (committed) {
         el.style.backgroundColor = committed;
         el.classList.add('filled');
         el.classList.remove('pending');
       } else {
         el.style.backgroundColor = '';
-        el.classList.remove('filled', 'pending');
+        el.classList.remove('filled', 'pending', 'pending-invalid');
       }
     }
   }
 }
 
-/** pending 피스가 (r, c)를 덮고 있으면 해당 색상 반환 */
-function getPendingColor(r, c) {
+/**
+ * pending 피스가 (r, c)를 덮고 있으면 셀 정보 반환
+ * @returns {{ color: string, valid: boolean } | null}
+ */
+function getPendingCellInfo(r, c) {
   if (!pending) return null;
   const pr = r - pending.row;
   const pc = c - pending.col;
   if (pr < 0 || pr >= pending.piece.shape.length) return null;
   const row = pending.piece.shape[pr];
   if (!row || pc < 0 || pc >= row.length || !row[pc]) return null;
-  return pending.piece.color;
+  return { color: pending.piece.color, valid: pending.valid };
 }
 
 function showHighlight(shape, boardRow, boardCol) {
@@ -338,13 +343,13 @@ function hideConfirmBtn() {
 //  Pending 상태 관리
 // ═══════════════════════════════════════════════════════════════
 
-/** drag → pending 전환 */
+/** drag → pending 전환 (유효 여부와 무관하게 보드 위면 항상 진입) */
 function enterPending(row, col) {
+  const valid = board.canPlace(drag.piece.shape, row, col);
   pending = {
     slotIdx: drag.slotIdx,
     piece:   drag.piece,
-    row,
-    col,
+    row, col, valid,
   };
   drag = null;
 
@@ -353,7 +358,8 @@ function enterPending(row, col) {
   rotateFab.classList.add('hidden');
 
   renderBoard();
-  showConfirmBtn();
+  if (valid) showConfirmBtn();
+  else hideConfirmBtn();
 }
 
 /** pending 상태 해제 */
@@ -389,21 +395,20 @@ function pickUpFromPending(cx, cy) {
   rotateFab.classList.remove('hidden');
 }
 
-/** pending 피스 탭 회전 (현재 위치에 맞을 때만) */
+/** pending 피스 탭 회전 (유효 여부와 무관하게 항상 회전) */
 function rotatePending() {
   if (!pending) return;
-  const rotated = rotateCW(pending.piece.shape);
-  if (board.canPlace(rotated, pending.row, pending.col)) {
-    pending.piece.shape = rotated;
-    renderBoard();
-    showConfirmBtn();
-  }
-  // 안 맞으면 무반응 (기존 방향 유지)
+  pending.piece.shape = rotateCW(pending.piece.shape);
+  pending.valid = board.canPlace(pending.piece.shape, pending.row, pending.col);
+  renderBoard();
+  if (pending.valid) showConfirmBtn();
+  else hideConfirmBtn();
 }
 
-/** pending 피스 확정 → 보드에 배치 */
+/** pending 피스 확정 → 보드에 배치 (유효한 위치일 때만) */
 function commitPending() {
   if (!pending) return;
+  if (!pending.valid) return;
   const { slotIdx, piece, row, col } = pending;
 
   board.place(piece.shape, row, col, piece.color);
@@ -560,10 +565,8 @@ function onPointerUp(e) {
 
   if (isOverBoard(cx, cy)) {
     const { row, col } = getBoardCoord(cx, cy, drag.piece.shape);
-    if (board.canPlace(drag.piece.shape, row, col)) {
-      enterPending(row, col); // 즉시 확정 아님 → pending
-      return;
-    }
+    enterPending(row, col); // 유효 여부 무관, 보드 위면 pending
+    return;
   }
 
   cancelDrag();
