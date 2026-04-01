@@ -133,14 +133,32 @@ html, body {
   border-color: rgba(239, 68, 68, 0.6) !important;
 }
 
-/* Clear flash animation */
+/* Clear 애니메이션 (강화) */
 .cell.clearing {
-  animation: clearFlash 0.35s ease-out forwards;
+  animation: clearFlash 0.38s ease-out forwards;
+  z-index: 2;
+  position: relative;
 }
 
 @keyframes clearFlash {
-  0%   { background-color: #fff; filter: brightness(2); }
-  100% { background-color: transparent; filter: brightness(1); }
+  0%   { filter: brightness(5) saturate(0.5); transform: scale(1.18); }
+  25%  { filter: brightness(3) saturate(1);   transform: scale(1.1);  }
+  100% { filter: brightness(1);               transform: scale(1);
+         background-color: transparent !important; }
+}
+
+/* 파티클 */
+.particle {
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 999;
+  animation: particleFly 0.55s ease-out forwards;
+}
+
+@keyframes particleFly {
+  0%   { transform: translate(0, 0) scale(1);   opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0); opacity: 0; }
 }
 
 /* ── Slot Container ─────────────────────────────────────────── */

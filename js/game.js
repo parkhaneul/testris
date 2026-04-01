@@ -3,6 +3,7 @@ import { Board } from './board.js';
 import { getRandomPiece, resetBag } from './pieces.js';
 import { rotateCW, cloneShape, escapeHtml } from './utils.js';
 import { fetchSessionToken, submitScore, fetchRanking } from './ranking.js';
+import { playPickup, playLineClear } from './audio.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  레이아웃
@@ -181,6 +182,7 @@ function clearHighlight() {
 }
 
 function animateClear(rows, cols, cb) {
+  spawnParticles(rows, cols);
   const cellEls = boardEl.children;
   rows.forEach(r => {
     for (let c = 0; c < BOARD_SIZE; c++) cellEls[r * BOARD_SIZE + c].classList.add('clearing');
@@ -191,7 +193,49 @@ function animateClear(rows, cols, cb) {
   setTimeout(() => {
     boardEl.querySelectorAll('.clearing').forEach(el => el.classList.remove('clearing'));
     cb();
-  }, 350);
+  }, 380);
+}
+
+const PARTICLE_COLORS = ['#9dd8f5','#fef08a','#d8b4fe','#86efac','#fca5a5','#93c5fd','#fdba74','#ffffff'];
+
+function spawnParticles(rows, cols) {
+  const cs   = getCellSize();
+  const rect = boardEl.getBoundingClientRect();
+
+  // 파티클을 생성할 셀 좌표 수집 (중복 제거)
+  const seen = new Set();
+  const positions = [];
+  const add = (r, c) => {
+    const key = `${r},${c}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    positions.push([
+      rect.left + (c + 0.5) * cs,
+      rect.top  + (r + 0.5) * cs,
+    ]);
+  };
+  rows.forEach(r => { for (let c = 0; c < BOARD_SIZE; c++) add(r, c); });
+  cols.forEach(c => { for (let r = 0; r < BOARD_SIZE; r++) add(r, c); });
+
+  // 셀마다 2~3개 파티클 (간격을 두고 생성)
+  positions.filter((_, i) => i % 2 === 0).forEach(([x, y]) => {
+    for (let k = 0; k < 3; k++) {
+      const p     = document.createElement('div');
+      p.className = 'particle';
+      const angle = Math.random() * Math.PI * 2;
+      const dist  = 20 + Math.random() * 50;
+      const size  = 4 + Math.random() * 5;
+      p.style.cssText = `
+        left: ${x}px; top: ${y}px;
+        width: ${size}px; height: ${size}px;
+        background: ${PARTICLE_COLORS[Math.floor(Math.random() * PARTICLE_COLORS.length)]};
+        --dx: ${(Math.cos(angle) * dist).toFixed(1)}px;
+        --dy: ${(Math.sin(angle) * dist).toFixed(1)}px;
+      `;
+      document.body.appendChild(p);
+      setTimeout(() => p.remove(), 650);
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -390,6 +434,7 @@ function pickUpFromPending(cx, cy) {
 
   slotPieceEls[p.slotIdx].style.opacity = '0.25';
   showFloating(drag.piece, cx, cy);
+  playPickup();
 }
 
 /** pending 피스 탭 회전 (유효 여부와 무관하게 항상 회전) */
@@ -418,6 +463,7 @@ function commitPending() {
 
   const result = board.clearLines();
   if (result.total > 0) {
+    playLineClear(result.total);
     animateClear(result.clearedRows, result.clearedCols, () => {
       renderBoard();
       addScore(result.score);
@@ -516,6 +562,7 @@ function onSlotPointerDown(e, idx) {
 
   slotPieceEls[idx].style.opacity = '0.25';
   showFloating(drag.piece, e.clientX, e.clientY);
+  playPickup();
 }
 
 // ── 전역 pointermove ─────────────────────────────────────────────
