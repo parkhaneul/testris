@@ -87,8 +87,7 @@ html, body {
 /* ── Board ──────────────────────────────────────────────────── */
 #board {
   display: grid;
-  grid-template-columns: repeat(10, var(--cell-size));
-  grid-template-rows: repeat(10, var(--cell-size));
+  /* grid-template-columns/rows는 JS에서 동적으로 설정 */
   border: 2px solid var(--border);
   background: var(--board-bg);
   border-radius: 4px;

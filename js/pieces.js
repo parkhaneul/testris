@@ -1,25 +1,43 @@
 import { cloneShape } from './utils.js';
 
 /**
- * 표준 테트리스 7종 피스 (Tetris Guideline 색상)
- * shape: 스폰 기본 방향
- * color: 공식 테트리스 색상
+ * 표준 테트리스 7종 피스 (파스텔 색상)
+ * 7-bag 시스템: 7개를 셔플한 뒤 순서대로 꺼내므로
+ * 동일 피스가 연속으로 과도하게 나오지 않습니다.
  */
 const PIECE_DEFS = [
-  { shape: [[1,1,1,1]],        color: '#00f0f0' }, // I — 시안
-  { shape: [[1,1],[1,1]],      color: '#f0f000' }, // O — 노랑
-  { shape: [[0,1,0],[1,1,1]],  color: '#a000f0' }, // T — 보라
-  { shape: [[0,1,1],[1,1,0]],  color: '#00f000' }, // S — 초록
-  { shape: [[1,1,0],[0,1,1]],  color: '#f00000' }, // Z — 빨강
-  { shape: [[1,0,0],[1,1,1]],  color: '#0000f0' }, // J — 파랑
-  { shape: [[0,0,1],[1,1,1]],  color: '#f0a000' }, // L — 주황
+  { shape: [[1,1,1,1]],        color: '#9dd8f5' }, // I — 하늘
+  { shape: [[1,1],[1,1]],      color: '#fef08a' }, // O — 연노랑
+  { shape: [[0,1,0],[1,1,1]],  color: '#d8b4fe' }, // T — 연보라
+  { shape: [[0,1,1],[1,1,0]],  color: '#86efac' }, // S — 연초록
+  { shape: [[1,1,0],[0,1,1]],  color: '#fca5a5' }, // Z — 연분홍
+  { shape: [[1,0,0],[1,1,1]],  color: '#93c5fd' }, // J — 연파랑
+  { shape: [[0,0,1],[1,1,1]],  color: '#fdba74' }, // L — 연주황
 ];
 
+/** 7-bag 풀 */
+let bag = [];
+
+function refillBag() {
+  bag = [...PIECE_DEFS];
+  // Fisher-Yates 셔플
+  for (let i = bag.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [bag[i], bag[j]] = [bag[j], bag[i]];
+  }
+}
+
 /**
- * 랜덤 피스 하나를 복사해서 반환
- * @returns {{ shape: number[][], color: string }}
+ * 다음 피스를 bag에서 꺼내 반환
+ * bag이 비면 자동으로 새로 채움
  */
 export function getRandomPiece() {
-  const def = PIECE_DEFS[Math.floor(Math.random() * PIECE_DEFS.length)];
+  if (bag.length === 0) refillBag();
+  const def = bag.pop();
   return { shape: cloneShape(def.shape), color: def.color };
+}
+
+/** 게임 재시작 시 bag 초기화 */
+export function resetBag() {
+  bag = [];
 }

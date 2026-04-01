@@ -1,6 +1,6 @@
 import { BOARD_SIZE, GAME_DURATION } from './config.js';
 import { Board } from './board.js';
-import { getRandomPiece } from './pieces.js';
+import { getRandomPiece, resetBag } from './pieces.js';
 import { rotateCW, cloneShape, escapeHtml } from './utils.js';
 import { fetchSessionToken, submitScore, fetchRanking } from './ranking.js';
 
@@ -85,6 +85,7 @@ async function init() {
   pending      = null;
   pendingPtr   = null;
   sessionToken = null;
+  resetBag();
 
   updateScoreDOM();
   updateTimerDOM();
@@ -101,6 +102,8 @@ async function init() {
 
 function buildBoardDOM() {
   boardEl.innerHTML = '';
+  boardEl.style.gridTemplateColumns = `repeat(${BOARD_SIZE}, var(--cell-size))`;
+  boardEl.style.gridTemplateRows    = `repeat(${BOARD_SIZE}, var(--cell-size))`;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
       const div = document.createElement('div');
@@ -291,14 +294,21 @@ function isOverBoard(cx, cy) {
   return cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
 }
 
-/** 포인터가 pending 피스 셀 위에 있는지 확인 */
+/** 포인터가 pending 피스의 바운딩박스(패딩 포함) 안에 있는지 확인 */
 function isOnPendingPiece(cx, cy) {
   if (!pending) return false;
   const cs   = getCellSize();
   const rect = boardEl.getBoundingClientRect();
-  const bc   = Math.floor((cx - rect.left) / cs);
-  const br   = Math.floor((cy - rect.top)  / cs);
-  return !!getPendingColor(br, bc);
+  const pad  = cs * 0.5; // 터치 인식 여유 영역
+
+  const cols  = Math.max(...pending.piece.shape.map(r => r.length));
+  const rows  = pending.piece.shape.length;
+  const left  = rect.left + pending.col * cs - pad;
+  const top   = rect.top  + pending.row * cs - pad;
+  const right = rect.left + (pending.col + cols) * cs + pad;
+  const bot   = rect.top  + (pending.row + rows) * cs + pad;
+
+  return cx >= left && cx <= right && cy >= top && cy <= bot;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -451,7 +461,7 @@ function setupEvents() {
     if (!pendingPtr) return;
     const dx = e.clientX - pendingPtr.startX;
     const dy = e.clientY - pendingPtr.startY;
-    if (Math.hypot(dx, dy) > 8) {
+    if (Math.hypot(dx, dy) > 18) {
       // 드래그로 확정 → 집어올리기
       pendingPtr = null;
       pickUpFromPending(e.clientX, e.clientY);
@@ -464,7 +474,7 @@ function setupEvents() {
     const dy  = e.clientY - pendingPtr.startY;
     const dt  = Date.now() - pendingPtr.startTime;
     pendingPtr = null;
-    if (Math.hypot(dx, dy) < 8 && dt < 300) {
+    if (Math.hypot(dx, dy) < 18 && dt < 400) {
       rotatePending(); // 탭 → 회전
     }
   });
@@ -540,7 +550,7 @@ function onPointerUp(e) {
   const dx  = cx - drag.startX;
   const dy  = cy - drag.startY;
   const dt  = Date.now() - drag.startTime;
-  const isTap = Math.hypot(dx, dy) < 8 && dt < 280;
+  const isTap = Math.hypot(dx, dy) < 18 && dt < 400;
 
   if (isTap) {
     // 탭 → 슬롯 피스 회전 후 drag 상태 유지

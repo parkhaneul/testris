@@ -1,5 +1,5 @@
 // ─── 게임 설정 ──────────────────────────────────────────────────
-export const BOARD_SIZE    = 10;
+export const BOARD_SIZE    = 8;
 export const GAME_DURATION = 100; // 초
 
 // ─── Supabase 설정 (배포 시 실제 값으로 교체) ──────────────────
