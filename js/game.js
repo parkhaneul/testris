@@ -5,13 +5,13 @@ import { rotateCW, cloneShape, escapeHtml } from './utils.js';
 import { fetchSessionToken, submitScore, fetchRanking } from './ranking.js';
 
 // ═══════════════════════════════════════════════════════════════
-//  레이아웃 초기화
+//  레이아웃
 // ═══════════════════════════════════════════════════════════════
 
 function initLayout() {
   const SLOT_W  = 90;
   const GAP     = 8;
-  const PADDING = 16; // 양쪽
+  const PADDING = 16;
   const availW  = Math.min(window.innerWidth, 500) - PADDING;
   const boardPx = availW - SLOT_W - GAP;
   const cell    = Math.floor(boardPx / BOARD_SIZE);
@@ -22,13 +22,14 @@ function initLayout() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  DOM 참조
+//  DOM
 // ═══════════════════════════════════════════════════════════════
 
 const boardEl        = document.getElementById('board');
 const slotPieceEls   = [document.getElementById('piece-0'), document.getElementById('piece-1')];
 const floatingEl     = document.getElementById('floating-piece');
 const rotateFab      = document.getElementById('rotate-fab');
+const confirmBtn     = document.getElementById('confirm-btn');
 const timerEl        = document.getElementById('timer-value');
 const scoreEl        = document.getElementById('score-value');
 const gameoverEl     = document.getElementById('gameover-overlay');
@@ -45,23 +46,27 @@ const rankingList    = document.getElementById('ranking-list');
 // ═══════════════════════════════════════════════════════════════
 
 let board;
-let slots;       // [piece|null, piece|null]
+let slots;
 let score;
 let timeLeft;
 let timerHandle;
-let active;      // 게임 진행 여부
+let active;
 let sessionToken;
 
-/** dragState: 드래그 진행 중 상태 */
+/** 드래그 중인 상태 */
 let drag = null;
-/*
-  drag = {
-    slotIdx: 0|1,
-    piece: { shape, color },   // 현재 드래그 중인 피스 (회전 반영)
-    startX, startY,            // 포인터 다운 위치
-    startTime,
-  }
-*/
+// { slotIdx, piece: {shape, color}, startX, startY, startTime }
+
+/** 보드에 올려놨지만 미확정 상태 */
+let pending = null;
+// { slotIdx, piece: {shape, color}, row, col }
+
+/** pending 피스 위에서 탭/드래그 감지용 */
+let pendingPtr = null;
+// { startX, startY, startTime }
+
+/** pointermove 최신 좌표 (rotation 시 재사용) */
+let lastPtr = { x: 0, y: 0 };
 
 // ═══════════════════════════════════════════════════════════════
 //  초기화
@@ -71,12 +76,14 @@ async function init() {
   initLayout();
   buildBoardDOM();
 
-  board  = new Board();
-  slots  = [getRandomPiece(), getRandomPiece()];
-  score  = 0;
-  timeLeft = GAME_DURATION;
-  active = true;
-  drag   = null;
+  board        = new Board();
+  slots        = [getRandomPiece(), getRandomPiece()];
+  score        = 0;
+  timeLeft     = GAME_DURATION;
+  active       = true;
+  drag         = null;
+  pending      = null;
+  pendingPtr   = null;
   sessionToken = null;
 
   updateScoreDOM();
@@ -85,7 +92,6 @@ async function init() {
   renderSlots();
   startTimer();
 
-  // 백그라운드에서 세션 토큰 발급 (비동기, 게임에 영향 없음)
   fetchSessionToken().then(tok => { sessionToken = tok; });
 }
 
@@ -114,15 +120,38 @@ function renderBoard() {
   const cells = boardEl.children;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
-      const el = cells[r * BOARD_SIZE + c];
-      const color = board.grid[r][c];
-      el.style.backgroundColor = color ?? '';
-      el.classList.toggle('filled', color !== null);
+      const el        = cells[r * BOARD_SIZE + c];
+      const committed = board.grid[r][c];
+      const pendingColor = getPendingColor(r, c);
+
+      el.classList.remove('highlight', 'invalid');
+
+      if (pendingColor) {
+        el.style.backgroundColor = pendingColor;
+        el.classList.add('filled', 'pending');
+      } else if (committed) {
+        el.style.backgroundColor = committed;
+        el.classList.add('filled');
+        el.classList.remove('pending');
+      } else {
+        el.style.backgroundColor = '';
+        el.classList.remove('filled', 'pending');
+      }
     }
   }
 }
 
-/** 하이라이트/invalid 셀 표시 */
+/** pending 피스가 (r, c)를 덮고 있으면 해당 색상 반환 */
+function getPendingColor(r, c) {
+  if (!pending) return null;
+  const pr = r - pending.row;
+  const pc = c - pending.col;
+  if (pr < 0 || pr >= pending.piece.shape.length) return null;
+  const row = pending.piece.shape[pr];
+  if (!row || pc < 0 || pc >= row.length || !row[pc]) return null;
+  return pending.piece.color;
+}
+
 function showHighlight(shape, boardRow, boardCol) {
   clearHighlight();
   const valid = board.canPlace(shape, boardRow, boardCol);
@@ -144,7 +173,6 @@ function clearHighlight() {
   });
 }
 
-/** 클리어 애니메이션 */
 function animateClear(rows, cols, cb) {
   const cellEls = boardEl.children;
   rows.forEach(r => {
@@ -173,8 +201,8 @@ function renderSlotPiece(idx, piece) {
   if (!piece) return;
 
   const { shape, color } = piece;
-  const rows = shape.length;
-  const cols = Math.max(...shape.map(r => r.length));
+  const rows     = shape.length;
+  const cols     = Math.max(...shape.map(r => r.length));
   const miniCell = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--mini-cell'));
 
   el.style.gridTemplateColumns = `repeat(${cols}, ${miniCell}px)`;
@@ -185,8 +213,8 @@ function renderSlotPiece(idx, piece) {
     for (let c = 0; c < cols; c++) {
       const cell = document.createElement('div');
       cell.className = 'piece-cell';
-      cell.style.width  = miniCell + 'px';
-      cell.style.height = miniCell + 'px';
+      cell.style.width           = miniCell + 'px';
+      cell.style.height          = miniCell + 'px';
       cell.style.backgroundColor = (shape[r] && shape[r][c]) ? color : 'transparent';
       el.appendChild(cell);
     }
@@ -194,7 +222,7 @@ function renderSlotPiece(idx, piece) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  플로팅 피스 렌더링
+//  플로팅 피스
 // ═══════════════════════════════════════════════════════════════
 
 function getCellSize() {
@@ -238,12 +266,14 @@ function moveFloating(piece, cx, cy) {
 
 function hideFloating() {
   floatingEl.style.display = 'none';
-  floatingEl.innerHTML = '';
+  floatingEl.innerHTML     = '';
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  보드 좌표 계산
+//  좌표 계산
 // ═══════════════════════════════════════════════════════════════
+
+function getCellSize_() { return getCellSize(); }
 
 function getBoardCoord(cx, cy, shape) {
   const rect = boardEl.getBoundingClientRect();
@@ -251,11 +281,8 @@ function getBoardCoord(cx, cy, shape) {
   const cols = Math.max(...shape.map(r => r.length));
   const rows = shape.length;
 
-  const pieceLeft = cx - (cols * cs) / 2;
-  const pieceTop  = cy - (rows * cs) / 2;
-
-  const col = Math.round((pieceLeft - rect.left) / cs);
-  const row = Math.round((pieceTop  - rect.top)  / cs);
+  const col = Math.round((cx - (cols * cs / 2) - rect.left) / cs);
+  const row = Math.round((cy - (rows * cs / 2) - rect.top)  / cs);
   return { row, col };
 }
 
@@ -264,28 +291,197 @@ function isOverBoard(cx, cy) {
   return cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
 }
 
+/** 포인터가 pending 피스 셀 위에 있는지 확인 */
+function isOnPendingPiece(cx, cy) {
+  if (!pending) return false;
+  const cs   = getCellSize();
+  const rect = boardEl.getBoundingClientRect();
+  const bc   = Math.floor((cx - rect.left) / cs);
+  const br   = Math.floor((cy - rect.top)  / cs);
+  return !!getPendingColor(br, bc);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Confirm 버튼 위치
+// ═══════════════════════════════════════════════════════════════
+
+function showConfirmBtn() {
+  if (!pending) return;
+  const cs   = getCellSize();
+  const rect = boardEl.getBoundingClientRect();
+  const cols = Math.max(...pending.piece.shape.map(r => r.length));
+
+  // 피스 오른쪽 위 모서리
+  const x = rect.left + (pending.col + cols) * cs;
+  const y = rect.top  + pending.row * cs;
+
+  confirmBtn.style.left = (x - 14) + 'px'; // 버튼 중심이 모서리에 오도록
+  confirmBtn.style.top  = (y - 14) + 'px';
+  confirmBtn.classList.remove('hidden');
+}
+
+function hideConfirmBtn() {
+  confirmBtn.classList.add('hidden');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Pending 상태 관리
+// ═══════════════════════════════════════════════════════════════
+
+/** drag → pending 전환 */
+function enterPending(row, col) {
+  pending = {
+    slotIdx: drag.slotIdx,
+    piece:   drag.piece,
+    row,
+    col,
+  };
+  drag = null;
+
+  hideFloating();
+  clearHighlight();
+  rotateFab.classList.add('hidden');
+
+  renderBoard();
+  showConfirmBtn();
+}
+
+/** pending 상태 해제 */
+function clearPending() {
+  if (!pending) return;
+  const idx = pending.slotIdx;
+  pending    = null;
+  pendingPtr = null;
+  hideConfirmBtn();
+  renderBoard();
+  // 슬롯 불투명도 복원 (피스가 손에 없으므로)
+  slotPieceEls[idx].style.opacity = '1';
+}
+
+/** pending 피스를 다시 손에 집어들기 (drag 전환) */
+function pickUpFromPending(cx, cy) {
+  const p = { ...pending };
+  pending    = null;
+  pendingPtr = null;
+  hideConfirmBtn();
+  renderBoard();
+
+  drag = {
+    slotIdx:   p.slotIdx,
+    piece:     p.piece,
+    startX:    cx,
+    startY:    cy,
+    startTime: Date.now(),
+  };
+
+  slotPieceEls[p.slotIdx].style.opacity = '0.25';
+  showFloating(drag.piece, cx, cy);
+  rotateFab.classList.remove('hidden');
+}
+
+/** pending 피스 탭 회전 (현재 위치에 맞을 때만) */
+function rotatePending() {
+  if (!pending) return;
+  const rotated = rotateCW(pending.piece.shape);
+  if (board.canPlace(rotated, pending.row, pending.col)) {
+    pending.piece.shape = rotated;
+    renderBoard();
+    showConfirmBtn();
+  }
+  // 안 맞으면 무반응 (기존 방향 유지)
+}
+
+/** pending 피스 확정 → 보드에 배치 */
+function commitPending() {
+  if (!pending) return;
+  const { slotIdx, piece, row, col } = pending;
+
+  board.place(piece.shape, row, col, piece.color);
+  slots[slotIdx] = null;
+
+  pending = null;
+  hideConfirmBtn();
+  renderSlotPiece(slotIdx, null);
+  slotPieceEls[slotIdx].style.opacity = '1';
+
+  const result = board.clearLines();
+  if (result.total > 0) {
+    animateClear(result.clearedRows, result.clearedCols, () => {
+      renderBoard();
+      addScore(result.score);
+      refillAndCheck(slotIdx);
+    });
+  } else {
+    renderBoard();
+    refillAndCheck(slotIdx);
+  }
+}
+
+function refillAndCheck(slotIdx) {
+  slots[slotIdx] = getRandomPiece();
+  renderSlotPiece(slotIdx, slots[slotIdx]);
+  if (!board.canAnyFit(slots)) endGame();
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  이벤트 설정
 // ═══════════════════════════════════════════════════════════════
 
 function setupEvents() {
-  // 슬롯 피스 포인터다운
+  // 슬롯 피스 드래그 시작
   slotPieceEls.forEach((el, idx) => {
     el.addEventListener('pointerdown', e => onSlotPointerDown(e, idx));
   });
 
-  // 전역 포인터 이벤트
-  document.addEventListener('pointermove',   onPointerMove, { passive: false });
+  // 전역 이벤트 (drag용)
+  document.addEventListener('pointermove',   onPointerMove,   { passive: false });
   document.addEventListener('pointerup',     onPointerUp);
   document.addEventListener('pointercancel', onDragCancel);
 
-  // 회전 FAB
+  // 보드 위 pending 피스 탭/드래그
+  boardEl.addEventListener('pointerdown', e => {
+    if (!active || !pending) return;
+    if (!isOnPendingPiece(e.clientX, e.clientY)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    pendingPtr = { startX: e.clientX, startY: e.clientY, startTime: Date.now() };
+  }, { passive: false });
+
+  boardEl.addEventListener('pointermove', e => {
+    if (!pendingPtr) return;
+    const dx = e.clientX - pendingPtr.startX;
+    const dy = e.clientY - pendingPtr.startY;
+    if (Math.hypot(dx, dy) > 8) {
+      // 드래그로 확정 → 집어올리기
+      pendingPtr = null;
+      pickUpFromPending(e.clientX, e.clientY);
+    }
+  });
+
+  boardEl.addEventListener('pointerup', e => {
+    if (!pendingPtr) return;
+    const dx  = e.clientX - pendingPtr.startX;
+    const dy  = e.clientY - pendingPtr.startY;
+    const dt  = Date.now() - pendingPtr.startTime;
+    pendingPtr = null;
+    if (Math.hypot(dx, dy) < 8 && dt < 300) {
+      rotatePending(); // 탭 → 회전
+    }
+  });
+
+  // Rotate FAB (drag 중 회전)
   rotateFab.addEventListener('pointerdown', e => {
     e.stopPropagation();
     if (drag) rotateDragPiece();
   });
 
-  // 게임오버 버튼
+  // Confirm 버튼 (pending 확정)
+  confirmBtn.addEventListener('pointerdown', e => {
+    e.stopPropagation();
+    commitPending();
+  });
+
+  // 게임오버 버튼들
   submitBtn.addEventListener('click', onSubmitScore);
   document.getElementById('ranking-btn').addEventListener('click', openRanking);
   document.getElementById('restart-btn').addEventListener('click', restart);
@@ -294,11 +490,12 @@ function setupEvents() {
   });
 }
 
-// ── 슬롯에서 포인터다운 ──────────────────────────────────────────
+// ── 슬롯 pointerdown ─────────────────────────────────────────────
 
 function onSlotPointerDown(e, idx) {
-  if (!active) return;
-  if (!slots[idx]) return;
+  if (!active)      return;
+  if (!slots[idx])  return;
+  if (pending)      return; // pending 중엔 새 피스 드래그 불가
 
   e.preventDefault();
   e.stopPropagation();
@@ -316,13 +513,14 @@ function onSlotPointerDown(e, idx) {
   rotateFab.classList.remove('hidden');
 }
 
-// ── 포인터 이동 ──────────────────────────────────────────────────
+// ── 전역 pointermove ─────────────────────────────────────────────
 
 function onPointerMove(e) {
   if (!drag) return;
   e.preventDefault();
 
   const { clientX: cx, clientY: cy } = e;
+  lastPtr = { x: cx, y: cy };
   moveFloating(drag.piece, cx, cy);
 
   if (isOverBoard(cx, cy)) {
@@ -333,43 +531,35 @@ function onPointerMove(e) {
   }
 }
 
-// ── 포인터업 (배치 or 취소) ─────────────────────────────────────
+// ── 전역 pointerup ───────────────────────────────────────────────
 
 function onPointerUp(e) {
   if (!drag) return;
 
   const { clientX: cx, clientY: cy } = e;
-  const dx = cx - drag.startX;
-  const dy = cy - drag.startY;
-  const dt = Date.now() - drag.startTime;
+  const dx  = cx - drag.startX;
+  const dy  = cy - drag.startY;
+  const dt  = Date.now() - drag.startTime;
   const isTap = Math.hypot(dx, dy) < 8 && dt < 280;
 
-  // 탭 → 슬롯 안에서 회전 후 드래그 상태 유지
   if (isTap) {
+    // 탭 → 슬롯 피스 회전 후 drag 상태 유지
     rotateDragPiece();
-    // 슬롯 미리보기도 업데이트
-    slotPieceEls[drag.slotIdx].style.opacity = '0.25';
     return;
   }
 
-  // 보드 위에서 드롭
   if (isOverBoard(cx, cy)) {
     const { row, col } = getBoardCoord(cx, cy, drag.piece.shape);
     if (board.canPlace(drag.piece.shape, row, col)) {
-      placePiece(row, col);
+      enterPending(row, col); // 즉시 확정 아님 → pending
       return;
     }
   }
 
-  // 보드 외부 or 배치 불가 → 슬롯 반환
   cancelDrag();
 }
 
-function onDragCancel() {
-  cancelDrag();
-}
-
-// ── 드래그 취소 ──────────────────────────────────────────────────
+function onDragCancel() { cancelDrag(); }
 
 function cancelDrag() {
   if (!drag) return;
@@ -380,52 +570,12 @@ function cancelDrag() {
   drag = null;
 }
 
-// ── 회전 ────────────────────────────────────────────────────────
+// ── drag 중 회전 ─────────────────────────────────────────────────
 
 function rotateDragPiece() {
   if (!drag) return;
   drag.piece.shape = rotateCW(drag.piece.shape);
-  showFloating(drag.piece, drag.startX, drag.startY);
-  // 현재 포인터 위치에 맞게 재배치 (마지막 알려진 위치)
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  배치 로직
-// ═══════════════════════════════════════════════════════════════
-
-function placePiece(row, col) {
-  const { slotIdx, piece } = drag;
-
-  // 보드에 피스 배치
-  board.place(piece.shape, row, col, piece.color);
-  slots[slotIdx] = null;
-
-  // UI 정리
-  hideFloating();
-  clearHighlight();
-  rotateFab.classList.add('hidden');
-  renderSlotPiece(slotIdx, null);
-  drag = null;
-
-  // 라인 클리어 확인
-  const result = board.clearLines();
-  if (result.total > 0) {
-    animateClear(result.clearedRows, result.clearedCols, () => {
-      renderBoard();
-      addScore(result.score);
-      refillAndCheck(slotIdx);
-    });
-  } else {
-    renderBoard();
-    refillAndCheck(slotIdx);
-  }
-}
-
-function refillAndCheck(slotIdx) {
-  slots[slotIdx] = getRandomPiece();
-  renderSlotPiece(slotIdx, slots[slotIdx]);
-
-  if (!board.canAnyFit(slots)) endGame();
+  showFloating(drag.piece, lastPtr.x, lastPtr.y);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -451,7 +601,7 @@ function startTimer() {
 
 function updateTimerDOM() {
   timerEl.textContent = timeLeft;
-  timerEl.className = '';
+  timerEl.className   = '';
   if (timeLeft <= 10)      timerEl.classList.add('timer-danger');
   else if (timeLeft <= 30) timerEl.classList.add('timer-warning');
 }
@@ -465,13 +615,14 @@ function endGame() {
   active = false;
   clearInterval(timerHandle);
   cancelDrag();
+  clearPending();
 
   finalScoreText.textContent = score.toLocaleString() + '점';
   rankForm.classList.remove('hidden');
   submitResult.classList.add('hidden');
-  submitBtn.disabled = false;
+  submitBtn.disabled    = false;
   submitBtn.textContent = '랭킹 등록';
-  nameInput.value = '';
+  nameInput.value       = '';
   gameoverEl.classList.remove('hidden');
 }
 
@@ -483,7 +634,7 @@ async function onSubmitScore() {
   const name = nameInput.value.trim();
   if (!name) { nameInput.focus(); return; }
 
-  submitBtn.disabled = true;
+  submitBtn.disabled    = true;
   submitBtn.textContent = '등록 중...';
 
   try {
@@ -491,7 +642,7 @@ async function onSubmitScore() {
     rankForm.classList.add('hidden');
     submitResult.classList.remove('hidden');
   } catch (err) {
-    submitBtn.disabled = false;
+    submitBtn.disabled    = false;
     submitBtn.textContent = '랭킹 등록';
     alert('등록 실패: ' + err.message);
   }
